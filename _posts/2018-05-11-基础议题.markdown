@@ -7,210 +7,218 @@ tags: c++
 description: more effective c++读书笔记
 ---
 
-<font size = 5 color = red>指针与引用的区别</font>
+## 指针与引用的区别
 
 1、在任何情况下都不能使用指向空值的引用，而指针可以不指向任何对象，所以引用应该初始化。
 
-```
-    char *p;
-    char c = 'A';
-    char &d = c;
-```
+
+{% highlight c++ %}
+char *p;
+char c = 'A';
+char &d = c;
+{% endhighlight %}
+
 
 2、不存在指向空值的引用这个事实意味着使用引用的代码效率比使用指针的要高。因为在使用引用之前不需要测试它的合法性。
 
-```
-    char fun(char *p)
-    {
-       if(p != NULL)
-         return *p;
-       else
-         return NULL;
-    }
+{% highlight c++ %}
+char fun(char *p)
+{
+  if(p != NULL)
+     return *p;
+  else
+     return NULL;
+}
 
-     char fun(char& c)
-     {
-        return c;
-     }
-```
+char fun(char& c)
+{
+   return c;
+}
+{% endhighlight %}
 
 3、指针可以被重新赋值以指向另一个不同的对象。但是引用则总是指向在初始化时被指定的对象，以后不能改变。
 
-```
-	char *p = "hello world";
-	char c = 'A';
-	p = &c;
-	char& d = c;
-
-```
+{% highlight c++ %}
+char *p = "hello world";
+char c = 'A';
+p = &c;
+char& d = c;
+{% endhighlight %}
 
 4、当你重载某个操作符时，你应该使用引用。最普通的例子是操作符[]。这个操作符典型的用法是返回一个目标对象，其能被赋值。
 
-```
-    template<typename T,int n = 10>
-    class refer
-    {
-    private:
-        T arr[n];
-    public:
-        refer(const T& t)
-    	{
-    		for(int i = 0; i< n; i++)
-    		    arr[i] = t;
-    	}
-    
-    	T& operator[](int i)
-    	{
-    		return arr[i];
-    	}
-    
-    };
-    
-    int main()
-    {
-      refer<int> ref(1);
-      cout<<ref[0]<<'\n';
-      ref[0] = 2;
-      cout<<ref[0]<<'\n';	
-      return 0;
-    }
-```
+{% highlight c++ %}
+template<typename T,int n = 10>
+class refer
+{
+private:
+    T arr[n];
+public:
+    refer(const T& t)
+	{
+		for(int i = 0; i< n; i++)
+		    arr[i] = t;
+	}
 
-<font size = 5 color = red>尽量使用C++风格的类型转换</font>
+	T& operator[](int i)
+	{
+		return arr[i];
+	}
+};
+
+int main()
+{
+  refer<int> ref(1);
+  cout<<ref[0]<<'\n';
+  ref[0] = 2;
+  cout<<ref[0]<<'\n';	
+  return 0;
+}
+{% endhighlight %}
+
+## 尽量使用C++风格的类型转换
 
 1、static_cast在功能上基本上与C风格的类型转换一样强大，含义也一样。它也有功能上限制。可以向下转换或向上转换.move函数就是用static_cast转成右值
 
-```
-    struct C {
-    int m = 0;
-    void hello() const {
+{% highlight c++ %}
+struct C 
+{
+  int m = 0;
+  void hello() const 
+  {
     std::cout << "Hello world, this is B!\n";
-    }
-    };
-    struct F : C {
-    void hello() const {
-      std::cout << "Hello world, this is D!\n";
-    }
-    };
-     
-    enum class E { ONE = 1, TWO, THREE };
-    enum EU { ONE = 1, TWO, THREE };
-    
-    // 2: 静态向下转型
-    F f;
-    C &br = f; // 通过隐式转换向上转型
-    br.hello();
-    F &another_d = static_cast<F &>(br); // 向下转型
-    another_d.hello();
-    C cr;
-    F another_f = static_cast<F &>(cr);//static_cast可以转换，dynamic_cast不行
-    //another_f = dynamic_cast<F &>(cr);
-    
-    // 3: 左值到亡值
-    std::vector<int> v2 = static_cast<std::vector<int> &&>(v);
-    std::cout << "after move, v.size() = " << v.size() << '\n';
-    
-    // 4: 弃值表达式
-    static_cast<void>(v2.size());
-    
-    // 5. 隐式转换的逆
-    void *nv = &n;
-    int *ni = static_cast<int *>(nv);
-    std::cout << "*ni = " << *ni << '\n';
-    
-    // 6. 数组到指针后随向上转型
-    F fa[10];
-    C *dp = static_cast<C *>(fa);
-    
-    // 7. 有作用域枚举到 int 或 float
-    E e = E::ONE;
-    int one = static_cast<int>(e);
-    std::cout << one << '\n';
-    
-    // 8. int 到枚举，枚举到另一枚举
-    E e2 = static_cast<E>(one);
-    EU eu = static_cast<EU>(e2);
-    
-    // 9. 指向成员指针向上转型
-    int F::*pm = &F::m;
-    std::cout << br.*static_cast<int C::*>(pm) << '\n';
-    
-    // 10. void* 到任何类型
-    void *voidp = &e;
-    std::vector<int> *p = static_cast<std::vector<int> *>(voidp);
-```
+  }
+};
+struct F : C 
+{
+  void hello() const 
+  {
+     std::cout << "Hello world, this is D!\n";
+  }
+};
+ 
+enum class E { ONE = 1, TWO, THREE };
+enum EU { ONE = 1, TWO, THREE };
+
+// 2: 静态向下转型
+F f;
+C &br = f; // 通过隐式转换向上转型
+br.hello();
+F &another_d = static_cast<F &>(br); // 向下转型
+another_d.hello();
+C cr;
+F another_f = static_cast<F &>(cr);//static_cast可以转换，dynamic_cast不行
+//another_f = dynamic_cast<F &>(cr);
+
+// 3: 左值到亡值
+std::vector<int> v2 = static_cast<std::vector<int> &&>(v);
+std::cout << "after move, v.size() = " << v.size() << '\n';
+
+// 4: 弃值表达式
+static_cast<void>(v2.size());
+
+// 5. 隐式转换的逆
+void *nv = &n;
+int *ni = static_cast<int *>(nv);
+std::cout << "*ni = " << *ni << '\n';
+
+// 6. 数组到指针后随向上转型
+F fa[10];
+C *dp = static_cast<C *>(fa);
+
+// 7. 有作用域枚举到 int 或 float
+E e = E::ONE;
+int one = static_cast<int>(e);
+std::cout << one << '\n';
+
+// 8. int 到枚举，枚举到另一枚举
+E e2 = static_cast<E>(one);
+EU eu = static_cast<EU>(e2);
+
+// 9. 指向成员指针向上转型
+int F::*pm = &F::m;
+std::cout << br.*static_cast<int C::*>(pm) << '\n';
+
+// 10. void* 到任何类型
+void *voidp = &e;
+std::vector<int> *p = static_cast<std::vector<int> *>(voidp);
+{% endhighlight %}
 2、dynamic_cast可以向上转换指针或者引用，但向下转换时需要基类指针或引用指向或引用的是子类，并且存在虚函数
 
-```
-    struct V {
-        virtual void f() {};  // 必须为多态以使用运行时检查的 dynamic_cast
-    };
-    struct A : virtual V {};
-    struct B : virtual V {
-      B(V* v, A* a) {
-        // 构造中转型（见后述 D 的构造函数中的调用）
-        dynamic_cast<B*>(v); // 良好定义： v 有类型 V* ， B 的 V 基类，产生 B*
-        dynamic_cast<B*>(a); // 未定义行为： a 有类型 A* ， A 非 B 的基类
-      }
-    };
-    struct D : A, B {
-        D() : B((A*)this, this) { }
-    };
-     
-    struct Base {
-        virtual ~Base() {}
-    };
-     
-    struct Derived: Base {
-        virtual void name() {}
-    };
+{% highlight c++ %}
+struct V {
+    virtual void f() {};  // 必须为多态以使用运行时检查的 dynamic_cast
+};
+struct A : virtual V {};
+struct B : virtual V 
+{
+  B(V* v, A* a) 
+  {
+    // 构造中转型（见后述 D 的构造函数中的调用）
+    dynamic_cast<B*>(v); // 良好定义： v 有类型 V* ， B 的 V 基类，产生 B*
+    dynamic_cast<B*>(a); // 未定义行为： a 有类型 A* ， A 非 B 的基类
+  }
+};
+struct D : A, B 
+{
+    D() : B((A*)this, this) { }
+};
+ 
+struct Base
+{
+    virtual ~Base() {}
+};
+ 
+struct Derived: Base
+{
+    virtual void name() {}
+};
+D d;                             // 最终导出类
+A &a = d;                        // 向上转型，可以用 dynamic_cast ，但不必须
+D &new_d = dynamic_cast<D &>(a); // 向下转型
+B &new_b = dynamic_cast<B &>(a); // 侧向转型
 
-    D d;                             // 最终导出类
-    A &a = d;                        // 向上转型，可以用 dynamic_cast ，但不必须
-    D &new_d = dynamic_cast<D &>(a); // 向下转型
-    B &new_b = dynamic_cast<B &>(a); // 侧向转型
-    
-    Base *b1 = new Base;
-    if (Derived *d = dynamic_cast<Derived *>(b1)) //转换失败
-    {
-        std::cout << "downcast from b1 to d successful\n";
-        d->name(); // 调用安全
-    }
-    
-    Base *b2 = new Derived;
-    if (Derived *d = dynamic_cast<Derived *>(b2)) //转换成功,必须要有虚函数
-    {
-        std::cout << "downcast from b2 to d successful\n";
-        d->name(); // 调用安全
-    }
-    
-    delete b1;
-    delete b2;
+Base *b1 = new Base;
+if (Derived *d = dynamic_cast<Derived *>(b1)) //转换失败
+{
+    std::cout << "downcast from b1 to d successful\n";
+    d->name(); // 调用安全
+}
 
-```
+Base *b2 = new Derived;
+if (Derived *d = dynamic_cast<Derived *>(b2)) //转换成功,必须要有虚函数
+{
+    std::cout << "downcast from b2 to d successful\n";
+    d->name(); // 调用安全
+}
+
+delete b1;
+delete b2;
+
+{% endhighlight %}
 
 3、const_cast去除const属性
 
 4、reinterpret_cast难以移植，其执行结果都是执行期定义。最普通的的用法就是在函数指针类型之间进行转换
 
-```
-    typedef void (*FuncPtr)(); // FuncPtr is 一个指向函数的指针，该函数没有参数返回值类型为void
+{% highlight c++ %}
+typedef void (*FuncPtr)(); // FuncPtr is 一个指向函数的指针，该函数没有参数返回值类型为void
+
+FuncPtr funcPtrArray[10]; // funcPtrArray 是一个能容纳10个FuncPtrs指针的数组
+
+int doSomething();
+//funcPtrArray[0] = &doSomething; // 错误！类型不匹配reinterpret_cast可以让你迫使编译器你的方法去看待它们：
+funcPtrArray[0] = reinterpret_cast<FuncPtr>(&doSomething);
     
-    FuncPtr funcPtrArray[10]; // funcPtrArray 是一个能容纳10个FuncPtrs指针的数组
-    
-    int doSomething();
-    //funcPtrArray[0] = &doSomething; // 错误！类型不匹配reinterpret_cast可以让你迫使编译器你的方法去看待它们：
-    funcPtrArray[0] = reinterpret_cast<FuncPtr>(&doSomething);
-    
-```
+{% endhighlight %}
 
 
 
-<font size=5 color=red>不要对数组使用多态</font>
+## 不要对数组使用多态
 
 对于入参为基类数组的函数来说，如果传入的参数为继承类的数组，则计算数组中下一个对象的地址时是按照基类的大小来计算。如果调用的是虚函数，第一个对象确实能调用成功，但由于接下来的对象地址计算错误，所以报错
  
-```
+{% highlight c++ %}
 class BST
 {
   private:
@@ -252,61 +260,61 @@ int main()
     printBSTArray(cout,bt,10);
     return 0;
 }
-```
+{% endhighlight %}
 
-<font size=5 color=red>避免无用的缺省构造函数</font>
+## 避免无用的缺省构造函数
 
 没有缺省构造函数，在下面三种情况会遇到问题：
 
 1、建立数组
 
-```
-    class EquipmentPiece {
-    public:
-      EquipmentPiece(int IDNumber):data(IDNumber){};
-    private:
-      int data;
-    };
-    
-    //EquipmentPiece bestPrice[10];错误
-    
-    //EquipmentPiece *bestPrice = new EquipmentPiece[10];错误
-    
-    /*解决办法1：单独初始初始化，但只能用于非堆数组*/
-    
-    int ID1, ID2, ID3, ID4,ID5,ID6,ID7,ID8,ID9, ID10; // 存储设备ID号的变量
+{% highlight c++ %}
+class EquipmentPiece 
+{
+public:
+  EquipmentPiece(int IDNumber):data(IDNumber){};
+private:
+  int data;
+};
 
-    EquipmentPiece bestPieces[] = { EquipmentPiece(ID1), 
-    EquipmentPiece(ID2),
-    EquipmentPiece(ID3),
-    EquipmentPiece(ID4),
-    EquipmentPiece(ID5),
-    EquipmentPiece(ID6),
-    EquipmentPiece(ID7),
-    EquipmentPiece(ID8),
-    EquipmentPiece(ID9),
-    EquipmentPiece(ID10)
-    };
-    /*解决办法2：利用指针数组进行初始化，但增加空间，需要删除*/
-    EquipmentPiece* worstPrices[10];
-    for(int i = 0;i < 10; i++)
-       worstPrices[i] = new EquipmentPiece(i);
-    for(int i = 0;i < 10; i++)
-       delete worstPrices[i];
-       
-    /*解决办法3：利用palcementnew，必须手动调用析构函数，手动调用操作符delet[]进行删除*/   
-    void * rawMemory = operator new(sizeof(EquipmentPiece) * 10);
-    EquipmentPiece* bestPieces1 = static_cast<EquipmentPiece*>(rawMemory);
-    for(int i = 0;i < 10; i++)
-       new(&bestPieces1[i]) EquipmentPiece(i);
-    for(int i = 0;i < 10; i++)
-       bestPieces1[i].~EquipmentPiece();
-    operator delete [](rawMemory);
-``` 
+//EquipmentPiece bestPrice[10];错误
+
+//EquipmentPiece *bestPrice = new EquipmentPiece[10];错误
+
+/*解决办法1：单独初始初始化，但只能用于非堆数组*/
+
+int ID1, ID2, ID3, ID4,ID5,ID6,ID7,ID8,ID9, ID10; // 存储设备ID号的变量
+EquipmentPiece bestPieces[] = { EquipmentPiece(ID1), 
+EquipmentPiece(ID2),
+EquipmentPiece(ID3),
+EquipmentPiece(ID4),
+EquipmentPiece(ID5),
+EquipmentPiece(ID6),
+EquipmentPiece(ID7),
+EquipmentPiece(ID8),
+EquipmentPiece(ID9),
+EquipmentPiece(ID10)
+};
+/*解决办法2：利用指针数组进行初始化，但增加空间，需要删除*/
+EquipmentPiece* worstPrices[10];
+for(int i = 0;i < 10; i++)
+   worstPrices[i] = new EquipmentPiece(i);
+for(int i = 0;i < 10; i++)
+   delete worstPrices[i];
+   
+/*解决办法3：利用palcementnew，必须手动调用析构函数，手动调用操作符delet[]进行删除*/   
+void * rawMemory = operator new(sizeof(EquipmentPiece) * 10);
+EquipmentPiece* bestPieces1 = static_cast<EquipmentPiece*>(rawMemory);
+for(int i = 0;i < 10; i++)
+   new(&bestPieces1[i]) EquipmentPiece(i);
+for(int i = 0;i < 10; i++)
+   bestPieces1[i].~EquipmentPiece();
+operator delete [](rawMemory);
+{% endhighlight %}
 
 2、类里没有定义缺省构造函数所造成的第二个问题是它们无法在许多基于模板（template-based）的容器类里使用
 
-```
+{% highlight c++ %}
 template <typename T>
 class Array
 {
@@ -330,7 +338,7 @@ Array<T>::~Array()
     delete [] data;
 }
 
-```
+{% endhighlight %}
 
 3、虚基类不提供缺省构造函数，这就要求所有由没有缺省构造函数的虚基类继承下来的派生类(无论有多远)都必须知道并理解提供给虚基类构造函数的参数的含义
 
