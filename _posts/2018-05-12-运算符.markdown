@@ -1,0 +1,217 @@
+---
+layout: post
+title:  "运算符"
+date:   2018-05-12 20:10:51 +0800
+categories: more_effective_c++
+tags: c++
+description: more effective c++读书笔记
+---
+
+## 谨慎定义类型转换函数
+
+有两种函数允许编译器进行隐式类型转换：单参数构造函数（single-argument constructors）和隐式类型转换运算符。
+
+隐式转换符可能会在你在不需要使用转换函数时，这些的函数却会被调用运行。解决方法是用不使用语法关键字的等同的函数来替代转换运算符。就像string没有包含隐式的从string转成char*的功能，而是提供了一个c_str用来转换。
+****
+{% highlight c++ %}
+    class Rational
+    {
+    public:
+      Rational(int num = 0,int denom = 1):numerator(num),denominator(denom){};
+      operator double()
+      {
+          return numerator * denominator;
+      }
+      double asDouble()
+      {
+          return numerator * denominator;
+      }
+    private:
+      int numerator;
+      int denominator;
+    };
+    
+    int main()
+    {
+        Rational r1(1,2);
+        cout<< r1;            //Rational没有重载<<运算符，但是可以隐式转换成double
+        cout<< r1.asDouble();
+    }
+{% endhighlight %}
+
+通过单参数构造函数进行隐式类型转换更难消除。可以通过：
+
+* 构造函数用explict声明，如果这样做，编译器会拒绝为了隐式类型转换而调用构造函数。显式类型转换依然合法
+
+{% highlight c++ %}
+template <typename T>
+class Array
+{
+    public:
+     explicit Array(int si):size(si)//加上explicit无法通过单参函数进行隐式转换
+      {
+          data = new T(size);
+      };
+
+     T& operator[](int i)const
+      {
+          return data[i];
+      }
+
+      ~Array()
+      {
+          delete [] data;
+      } 
+    private:
+      int size;
+      T *data;
+};
+
+bool operator==(const Array<int> &a,const Array<int> &b)
+{
+    for (int i = 0; i < 10; i++)
+    {
+        if (a == b[i]);
+        else
+          return false;
+    }
+    return true;
+}
+
+int main()
+{
+    Array<int> a(10);  //正确，显示调用
+    Array<int> b(10);
+
+   // if(a == b);     //错误，无法将int隐式转换成Array
+
+}
+{% endhighlight %}
+
+第二种方法就是建立一个新类，去替换隐式转换的参数
+
+{% highlight c++ %}
+template<typename T>
+class vector
+{
+    public:
+      class vectorsize
+      {
+          public:
+            vectorsiz(int si):size(si){}
+          private:
+            int size;
+      };
+      vector(vectorsize v):vs(v)
+      {
+          data = new T(vs);
+      }
+      T& operator[](int i)const
+      {
+          return data[i];
+      }
+
+      ~vector()
+      {
+          delete [] data;
+      } 
+    private:
+      T* data;
+      vectorsize vs;
+
+};
+
+bool operator==(const vector<int> &a,const vector<int> &b)
+{
+    for (int i = 0; i < 10; i++)
+    {
+        if (a == b[i]);       //int可以隐式转换成vectorsize，但vectorsize不会再隐式转换成vector
+        else
+          return false;
+    }
+    return true;
+}
+{% endhighlight %}
+
+## 自增(increment)、自减(decrement)操作符前缀形式与后缀形式的区别
+
+后缀形式需要增加一个参数，用于区别前缀形式。且因为要返回一个新创建的对象，所以对于自定义类型效率低
+
+{% highlight c++ %}
+class UPint
+{
+    private:
+      int i;
+    public:
+      UPint& operator++()
+      {
+         i += 1;
+         return (*this);
+      };
+      const UPint operator++(int)     //返回的是对象，效率低。返回const对象，防止出现i++++，没有加两次，而且与int的行为不符
+      {
+          UPint oldvalue(*this);
+          this->i += 1;
+          return oldvalue;
+      }
+};
+{% endhighlight %}
+
+## 不要重载“&&”,“||”, 或“,”
+
+因为这三个运算符都对表达式的运算顺序有要求，而C++语言规范没有定义函数参数的计算顺序
+
+&&运算符如果第一个表达式成功才会计算第二个表达式
+
+{% highlight c++ %}
+char *p;
+
+if(p != NULL && strlen(p))//如果重载，并不能保证先运行p != NULL
+...
+{% endhighlight %}
+
+||运算符类似。
+
+一个包含逗号的表达式首先计算逗号左边的表达式，然后计算逗号右边的表达式；整个表达式的结果是逗号右边表达式的值。所以，同样的原因，不能重载逗号运算符。
+
+除此之外，以下运算符也不能重载
+
+. .* :: ?: 
+
+new delete sizeof typeid
+
+static_cast dynamic_cast const_cast reinterpret_cast
+
+
+## 理解各种不同含义的new和delete
+
+  * new操作符是语言内置的，不能改变它的含义。它要完成的功能分成两部分，第一是分配足够的内存以便容纳所需的类型对象，第二则是调用构造函数初始化内存中的对象。
+
+  * 可以改变的是如何为对象分配内存。new操作符为分配内存调用的函数的名字是operator new，通常声明如下
+
+{% highlight c++ %}
+
+void * operator new(size_t size);
+
+{% endhighlight %}
+
+可以增加额外的参数重载operator new，但第一个参数类型必须是size_t。
+
+ * placement new在一块已经获得指针的内存里创建一个对象。
+ 
+{% highlight c++ %}
+
+char *p = new char[sizeof(alloc)];
+
+q = new(p) alloc(1);
+
+{% endhighlight %}
+
+同时要注意new中调用构造函数抛出异常时内存回收的问题，这里要placement new对应的placement delete回收内存。  
+
+* Arrays
+
+针对数组，内存分配调用的是operator new[]
+
+
+

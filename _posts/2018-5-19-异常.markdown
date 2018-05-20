@@ -1,0 +1,286 @@
+---
+layout: post
+title:  "异常"
+date:   2018-05-19 11:09:51 +0800
+categories: more_effective_c++
+tags: c++
+description: more effective c++读书笔记
+---
+
+## 使用析构函数防止资源泄露
+
+当因为异常或其他原因导致局部对象没有释放，从而出现内存泄露时，可以将内存释放代码放入析构函数中。因为当函数返回时局部对象总是被释放，无论函数是如何退出的
+
+{% highlight c++ %}
+
+class string
+{
+  private:
+    int size;
+    char *data;
+
+  public:
+    string(int i):size(i)
+    {
+        data = new char[size];   //这种会有问题，出现异常是，c++只保证对象会调用析构函数                                                                      
+                                 //而指针不会
+    }
+
+    ~string()
+    {
+        delete [] data;
+    }
+};
+
+{% endhighlight %}
+
+## 在构造函数中防止资源泄漏
+
+当成员为指针，指向动态分配的对象，因此当指针消失的时候，这些对象应该被删除。
+可以使用智能指针
+
+{% highlight c++ %}
+
+class string
+{
+  private:
+    int size;
+    std::shared_ptr<char> data;
+
+  public:
+    string(int i):size(i),data(std::shared_ptr<char>(new char[i]))
+    {
+    }
+
+};
+
+{% endhighlight %}
+
+## 理解“抛出一个异常”与“传递一个参数”或“调用一个虚函数”间的差异
+
+传递函数参数与异常的途径可以是传值、传递引用或传递指针，这是相同的。但是当你传递参数和异常时，系统所要完成的操作过程则是完全不同的。产生这个差异的原因是：你调用函数时，程序的控制权最终还会返回到函数的调用处，但是当你抛出一个异常时，控制权永远不会回到抛出异常的地方。所以捕获异常时，会对异常进行拷贝
+
+{% highlight c++ %}
+
+struct A
+{
+
+};
+
+void funa()
+{
+    try
+    {
+        A a;
+        std::cout<<"the address of a:"<<&a<<std::endl;
+       throw a;
+    }
+    catch(A& a)
+    {
+        std::cout<<"the address of catched a:"<<&a<<std::endl;//虽然传递的是引用，但仍然进行了复制
+    }
+}
+
+void funb()
+{
+    try
+    {
+        A a;
+        std::cout<<"the address of a:"<<&a<<std::endl;
+       throw a;
+    }
+    catch(A a)
+    {
+        std::cout<<"the address of catched a:"<<&a<<std::endl;//传值进行了复制
+    }
+}
+
+void func()
+{
+    try
+    {
+        static A a;
+        std::cout<<"the address of a:"<<&a<<std::endl;
+       throw a;
+    }
+    catch(A& a)
+    {
+        std::cout<<"the address of catched a:"<<&a<<std::endl;//即使对象在try之后仍然存在，还是进行了复制
+    }
+}
+
+{% endhighlight %}
+
+当异常对象被拷贝时，拷贝操作是由对象的拷贝构造函数完成的。该拷贝构造函数是对象的静态类型（static type）所对应类的拷贝构造函数，而不是对象的动态类型（dynamic type）对应类的拷贝构造函数
+
+{% highlight c++ %}
+
+class Base
+{
+  public:
+    virtual void print()
+    {
+        std::cout << "Base" << std::endl;
+    }
+};
+
+class Derived : public Base
+{
+  public:
+    virtual void print()
+    {
+        std::cout << "Derived" << std::endl;
+    }
+};
+
+void funf()
+{
+    try
+    {
+        try
+        {
+            Derived d;
+            Base &b = d;
+            throw d;
+        }
+        catch (Base &b)
+        {
+            b.print();//Derived
+            throw;    //将异常原样抛出，仍为Derived
+        }
+    }
+    catch (Base &b)
+    {
+        b.print();//Derived
+    }
+}
+
+void fund()
+{
+    try
+    {
+        try
+        {
+            Derived d;
+            Base &b = d;
+            throw d;
+        }
+        catch (Base &b)
+        {
+            b.print();//Derived
+            throw b;  //抛出的为Base，进行拷贝之后变为Base类型
+        }
+    }
+    catch (Base &b)
+    {
+        b.print();//Base
+    }
+}
+
+void fune()
+{
+    try
+    {
+        try
+        {
+            Derived d;
+            Base &b = d;
+            throw b;   //抛出的对象为Base，即使b引用的是一个SpecialWidget
+        }
+        catch (Base &b)
+        {
+            b.print();//Base
+            throw;
+        }
+    }
+    catch (Base &b)
+    {
+        b.print(); //Base
+    }
+}
+
+{% endhighlight %}
+
+通过指针抛出异常与通过指针传递参数是一样的，不论哪种方法都是一个指针的拷贝被传递。当然，指针指向的对象不能是个局部对象指针。
+
+第二个差异是在函数调用者或抛出异常者与被调用者或异常捕获者之间的类型匹配的过程不同。函数中参数存在隐式转换，而异常匹配只存在两种类型转换：。第一种是继承类与基类间的转换。第二种是允许从一个类型化指针（typed pointer）转变成无类型指针（untyped pointer）。
+
+第三个差异是catch子句匹配顺序总是取决于它们在程序中出现的顺序，而调用一个虚拟函数时，被调用的函数位于与发出函数调用的对象的动态类型（dynamic type）最相近的类里。
+
+## 通过引用（reference）捕获异常
+
+通过指针捕获异常存在指针不能只想局部对象，动态分配对象存在内存泄露的问题，而且在catch中无法区分该指针是否是在堆上建立的。除此之外，通过指针捕获异常也不符合C++语言本身的规范。四个标准的异常――bad_alloc，bad_cast,bad_typeid和bad_exception――都不是指向对象的指针，所以你必须通过值或引用来捕获它们。
+
+通过值捕获异常会导致拷贝两次，而且派生类的异常对象被做为基类异常对象捕获时，那它的派生类行为就被切掉了
+
+{% highlight c++ %}
+
+void fung()
+{
+    try
+    {
+        Derived d;
+        throw d;
+    }
+    catch (Base b) //接收的的类型为Base
+    {
+        b.print(); //Base
+    }
+}
+{% endhighlight %}
+
+通过引用捕获异常不会出现这些问题，只会拷贝一次。
+
+## 审慎使用异常规格(exception specifications)
+
+编译器允许调用一个函数，其抛出的异常与发出调用的函数的异常规格不一致，并且这样的调用可能导致程序执行被终止，所以在编写软件时应该采取措施把这种不一致减小到最少。
+* 一种好方法是避免在带有类型参数的模板内使用异常规格。
+
+{% highlight c++ %}
+
+template<class T>
+bool operator==(const T& lhs, const T& rhs) throw()
+{
+return &lhs == &rhs;
+}
+{% endhighlight %}
+
+opertor&可能会抛出一个异常，这样就违反了我们的异常规格，使得程序控制跳转到unexpected。
+
+* 第二个方法是如果在一个函数内调用其它没有异常规格的函数时应该去除这个函数的异常规格
+
+* 避免调用unexpected的第三个方法是处理系统本身抛出的异常。
+
+{% highlight c++ %}
+
+template<class T>
+class UnexpectedException {}; // 所有的unexpected异常对象被
+//替换为这种类型对象
+void convertUnexpected() // 如果一个unexpected异常被
+{ // 抛出，这个函数被调用
+throw UnexpectedException();
+}
+
+set_unexpected(convertUnexpected);
+{% endhighlight %}
+
+一个unexpected异常将触发调用convertUnexpected函数。
+
+另一种把unexpected异常转变成知名类型的方法是替换unexpected函数，让其重新抛出当前异常，这样异常将被替换为bad_exception。
+
+{% highlight c++ %}
+
+void convertUnexpected() // 如果一个unexpected异常被
+{ //抛出，这个函数被调用
+throw; // 它只是重新抛出当前
+} // 异常
+set_unexpected(convertUnexpected);
+// 安装 convertUnexpected
+// 做为unexpected
+// 的替代品
+{% endhighlight %}
+
+
+## 了解异常处理的系统开销
+
+为了使异常开销最小化，只要可能就尽量采用不支持异常的方法编译程序，把使用try块和异常规格限制在你确实需要它们的地方，并且只有在确为异常的情况下（exceptional）才抛出异常。
