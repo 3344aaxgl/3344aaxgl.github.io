@@ -1,0 +1,480 @@
+---
+layout: post
+title:  "线程间共享数据"
+date:   2018-05-26 14:03:51 +0800
+categories: cpp_concurrency_in_action
+tags: c++
+description: cpp concurrency in action读书笔记
+---
+
+
+## 3.1 共享数据带来的问题
+
+线程间潜在问题就是修改共享数据，致使不变量遭到破坏。
+
+### 3.1.1 条件竞争
+
+恶性条件竞争通常发生于完成对多于一个的数据块的修改时，因为操作要访问两个独立的数据块，独立的指令将会对数据块将进行修改，并且其中一个线程可能正在进行时，另一个线程就对数据块进行了访问。因为出现的概率太低，条件竞争很难查找，也很难复现。
+
+条件竞争通常是时间敏感的，所以程序以调试模式运行时，它们常会完全消失，因为调试模式会影响程序的执行时间
+
+### 3.1.2 避免恶性条件竞争
+
+解决恶性条件竞争：
+   * 对数据结构采用某种保护机制，确保只有进行修改的线程才能看到不变量被破坏时的中间状态。从其他访问线程的角度来看，修改不是已经完成了，就是还没开始。
+   * 对数据结构和不变量的设计进行修改，修改完的结构必须能完成一系列不可分割的变化，也就是保证每个不变量保持稳定的状态，这就是所谓的无锁编程。
+
+## 3.2 使用互斥量保护共享数据
+
+当访问共享数据前，使用互斥量将相关数据锁住，再当访问结束后，再将数据解锁。线程库需要保证，当一个线程使用特定互斥量锁住共享数据时，其他的线程想要访问锁住的数据，都必须等到之前那个线程对数据进行解锁后，才能进行访问。这就保证了所有线程能看到共享数据，而不破坏不变量。
+
+### 3.2.1 C++中使用互斥量
+
+C++中通过实例化 std::mutex 创建互斥量，通过调用成员函数lock()进行上锁，unlock()进行解锁。不过，不推荐实践中直接去调用成员函数，因为调用成员函数就意味着，必须记住在每个函数出口都要去调用unlock()，也包括异常的情况。C++标准库为互斥量提供了一个RAII语法的模板类 std::lock_guard ，其会在构造的时候提供已锁的互斥量，并在析构的时候进行解锁，从而保证了一个已锁的互斥量总是会被正确的解锁。
+
+{% highlight c++ %}
+
+void add_to_list(int new_value)
+{
+    std::lock_guard<std::mutex> guard(some_mutex);//析构函数自动释放互斥量
+    some_list.push_back(new_value);
+}
+
+bool list_contains(int value_to_find)
+{
+    std::lock_guard<std::mutex> guard(some_mutex);
+    return std::find(some_list.begin(),some_list.end(),value_to_find) != some_list.end();
+}
+
+int main()
+{
+    std::vector<std::thread> threads(3);
+
+    for(int i = 0; i < 3; i++)
+    {
+        threads[i] = std::thread(add_to_list, i+1);
+    }
+
+    for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
+
+    std::cout<<list_contains(4)<<" "<<list_contains(3);
+
+    return 0;
+}
+{% endhighlight %}
+
+### 3.2.2 精心组织代码来保护共享数据
+
+{% highlight c++ %}
+
+class some_data
+{
+private:
+  int a;
+  std::string b;
+public:
+  void do_something()
+  {
+
+  } 
+};
+
+class data_wrapper
+{
+  private:
+    some_data data;
+    std::mutex m;
+
+  public:
+    template <typename Fundction>
+    void process_data(Fundction func)
+    {
+        std::lock_guard<std::mutex> l(m);//互斥保护
+        func(data);
+    }
+};
+
+some_data* unprotected;
+
+void malicious_function(some_data& data)
+{
+    unprotected = &data;   //得到成员指针
+}
+
+data_wrapper x;
+
+void foo()
+{
+    x.process_data(malicious_function);
+    unprotected->do_something();
+}
+{% endhighlight %}
+
+
+切勿将受保护数据的指针或引用传递到互斥锁作用域之外，无论是函数返回值，还是存储在外部可见内存，亦或是以参数的形式传递到用户提供的函数中去。
+
+### 3.2.3 发现接口内在的条件竞争
+
+在栈中，pop操作需先判断栈是否为空，然后取值，最后删除节点。但在判断为空与取值之间，取值与删除节点之间，都可能存在条件竞争，所以需要同一互斥量去保护这些操作。而且如果先删除节点，再返回其值时，如果拷贝数据出错，则数据丢失。需要先进行拷贝，然后在删除（RCU）
+
+{% highlight c++ %}
+
+template<typename T>
+class threadsafe_stack
+{
+private:
+    std::stack<T> data;
+    mutable std::mutex m;
+public:
+    threadsafe_stack():data(std::stack<T>())
+    {
+
+    }
+    threadsafe_stack(const threadsafe_stack& other)
+    {
+        std::lock_guard<std::mutex> lock(m);
+        data = other.data;
+    }
+    threadsafe_stack& operator=(const threadsafe_stack&) = delete;
+
+    void push(T new_value)
+    {
+        std::lock_guard<std::mutex> lock(m);
+        data.push(new_value);
+    }
+
+    std::shared_ptr<T> pop()
+    {
+        std::lock_guard<std::mutex> lock(m);  
+        if(data.empty()) throw empty_stack();
+
+        std::shared_ptr<T> const res (std::make_shared<T>(data.top()));
+        data.pop();
+        return res;
+    }
+
+    void pop(T& value)
+    {
+        std::lock_guard<std::mutex> lock(m); 
+        if(data.empty()) throw empty_stack();
+
+        value = data.top();
+        data.pop();        
+    }
+    
+    bool empty()
+    {
+        std::lock_guard<std::mutex> lock(m); 
+        return data.empty();
+    }
+};
+{% endhighlight %}
+
+
+### 3.2.4 死锁:问题描述及解决方案
+
+一对线程需要对他们所有的互斥量做一些操作,其中每个线程都有一个互斥量,且等待另一个解锁。这样没有线程能工作,因为他们都在等待对方释放互斥量。这种情况就是死锁,它的最大问题就是由两个或两个以上的互斥量来锁定一个操作。
+
+避免死锁的一般建议,就是让两个互斥量总以相同的顺序上锁:总在互斥量B之前锁住互斥量 A,就永远不会死锁。
+
+但如果两个线程试图在相同的两个实例间进行数据交换时,程序又死锁了!C++标准库有办法解决这个问题, std::lock ——可以一次性锁住多个(两个以上)的 互斥量,并且没有副作用(死锁风险)。
+
+{% highlight c++ %}
+
+class X
+{
+private:
+    int data;
+    std::mutex m;
+public:
+    X(int d):data(d)
+    {
+
+    }
+    friend void swap(X& lhs, X& rhs)
+    {   
+        // 锁定两个互斥而不死锁
+        std::lock(lhs.m, rhs.m);
+        //保证二个已锁定互斥在作用域结尾解锁
+        std::lock_guard<std::mutex> lock_a(lhs.m,std::adopt_lock);
+        std::lock_guard<std::mutex> lock_b(rhs.m,std::adopt_lock);
+
+        std::swap(lhs.data, rhs.data);
+    }
+};
+{% endhighlight %}
+
+std::adopt_lock表示假设调用方线程已拥有互斥的所有权，这样互斥量在作用域结尾能自动解锁
+
+### 3.2.5 避免死锁的进阶指导
+
+* 避免嵌套锁
+
+一个线程已获得一个锁时,再别去获取第二个。当你需要获取多个锁,使用一个 std::lock 来做这件事(对获取锁的操作上锁),避免产生死锁。
+
+* 避免在持有锁时调用用户提供的代码
+
+因为代码是用户提供的,你没有办法确定用户要做什么;用户程序 可能做任何事情,包括获取锁。
+
+* 使用固定顺序获取锁
+
+当硬性条件要求你获取两个以上(包括两个)的锁,并且不能使用 std::lock 单独操作来获取它们;那么最好在每个线程上,用固定的顺序获取它们获取它们(锁)。
+
+* 使用锁的层次结构
+
+使用层次锁可以在程序运行时对上锁的顺序进行检测，
+
+{% highlight c++ %}
+//层级互斥量
+class hierarchical_mutex
+{
+private:
+    std::mutex interal_mutex;
+    unsigned long const hierarchy_value;
+    unsigned long previous_hierarchy_value;
+    static thread_local unsigned long this_thread_hierarchy_value;
+    void check_for_hierarchy_violation()
+    {
+        if(this_thread_hierarchy_value <= hierarchy_value)//限制锁的层级
+        {
+            throw std::logic_error("mutex hierarchy violated");
+        } 
+    }
+
+    void update_hierarchy_value()
+    {
+        previous_hierarchy_value = this_thread_hierarchy_value;
+        this_thread_hierarchy_value = hierarchy_value;
+    }
+
+public:
+    explicit hierarchical_mutex(unsigned long value):hierarchy_value(value),previous_hierarchy_value(0)
+    {
+
+    }
+
+    void lock()
+    {
+        check_for_hierarchy_violation();//先检查当前的层次是否大于要锁的层次
+        interal_mutex.lock();
+        update_hierarchy_value();//更新当前层次为锁住的层次
+    }
+
+    void unlock()
+    {
+        this_thread_hierarchy_value = previous_hierarchy_value;//回退到上一个层次
+        interal_mutex.unlock();
+    }
+
+    bool try_lock()
+    {
+        check_for_hierarchy_violation();
+        if(!interal_mutex.try_lock())
+          return false;
+        update_hierarchy_value();
+        return true;
+    }
+};
+
+//每个线程都能独立的拥有这个变量的副本，结合static一起使用，在这个线程中，这个类的所有对象都能按照顺序进行上锁
+thread_local unsigned long hierarchical_mutex::this_thread_hierarchy_value(ULONG_MAX);
+
+
+void Test_hierarchical_mutex()
+{
+    hierarchical_mutex  high_level_lock(1000);
+    hierarchical_mutex  low_level_lock(500);
+    std::lock_guard<hierarchical_mutex> lk1(high_level_lock);//调整顺序报错
+    std::lock_guard<hierarchical_mutex> lk2(low_level_lock);
+    
+    std::cout<<"lock two level lock"<<'\n';
+}
+{% endhighlight %}
+
+### 3.2.6 std::unique_lock——灵活的锁
+
+std::unique允许延迟锁定、锁定的有时限尝试、递归锁定、所有权转移和与条件变量一同使用。
+
+首先，可将std::adopt_lock作为第二个参数传入构造函数，对互斥量进行管理；也可以将std::defer_lock作为第二个参数传递进去，表明互斥量应保持解锁状态
+
+{% highlight c++ %}
+
+class X1
+{
+private:
+    int data;
+    std::mutex m;
+public:
+    X1(int d):data(d)
+    {
+
+    }
+    friend void swap(X1& lhs, X1& rhs)
+    {
+        std::unique_lock<std::mutex> lock_a(lhs.m,std::defer_lock);//仍未取得锁，只是方便解锁
+        std::unique_lock<std::mutex> lock_b(rhs.m,std::defer_lock);
+        std::lock(lock_a, lock_b);//互斥量上锁
+        
+        std::swap(lhs.data, rhs.data);
+    }
+};
+{% endhighlight %}
+
+### 3.2.7 不同域中互斥量所有权的传递
+
+std::mutex既不可复制，也不能移动。而std::unique_lock通过一个指向互斥量的指针来实现移动，可以用来传递互斥量的所有权。
+
+{% highlight c++ %}
+
+std::unique_lock<std::mutex> get_lock()
+{
+    //引用全局变量
+    extern std::mutex some_mutex;
+    std::unique_lock<std::mutex> lk(some_mutex);
+    return lk;
+}
+
+void process_data()
+{
+    std::unique_lock<std::mutex> lk(get_lock());
+}
+{% endhighlight %}
+
+## 3.2.8 锁的粒度
+
+锁的粒度是一个摆手术语，用来描述通过一个锁保护着的数据量大小。一个细粒度锁能够保护较小的数据量，一个粗粒度锁能够保护较多的数据量。
+
+{% highlight c++ %}
+
+void get_and_process_data()
+{
+    std::unique_lock<std::mutex> my_lock(the_mutex);
+    some_class data_to_process = get_next_data_chunk();
+    my_lock.unlock();
+    result_type = process(data_to_porcess);
+    my_lock.lock();
+    write_result(data_to_process,result);
+}
+{% endhighlight %}
+
+如果锁的粒度过小，也会出现问题
+
+{% highlight c++ %}
+
+class Y
+{
+  private:
+    int some_detail;
+    mutable std::mutex m;
+    int get_detail() const
+    {
+        std::lock_guard<std::mutex> lock_a(m); // 1
+        return some_detail;
+    }
+
+  public:
+    Y(int sd) : some_detail(sd) {}
+    friend bool operator==(Y const &lhs, Y const &rhs)
+    {
+        if (&lhs == &rhs)
+            return true;
+        int const lhs_value = lhs.get_detail(); // 2
+        int const rhs_value = rhs.get_detail(); // 3
+        return lhs_value == rhs_value;          // 4
+    }
+};
+{% endhighlight %}
+
+步骤2与步骤3都互斥获取了数据，但在执行步骤4时，数据可能已经发生改变，所以这个比较已经失去了意义。
+
+## 3.3 保护共享数据的替代设施
+
+### 3.3.1 保护共享数据的初始化过程
+
+如果共享数据每次初始化都需要加锁，太影响效率，所以出现双重检查锁机制。
+
+{% highlight c++ %}
+
+//双重检查锁机制实现单例模式
+void DCL_Singleton()
+{
+    if(!resource_ptr)
+    {
+        std::lock_guard<std::mutex> lk(some_mutex);
+        if(!resource_ptr)
+        {
+            resource_ptr.reset(new some_data);
+        }
+    }
+
+}
+{% endhighlight %}
+
+多线程中通过使用双重检查锁机制实现单例模式的问题在于，new操作实际是由两部分组成，第一步由operator new分配空间，然后调用，placemet new在已分配的空间上进行构造。则当空间分配成功，但还未进行构造时，如果这时有其他线程进行指针是否为空的校验，则指针不为空，不会进行对象的创建，直接使用对象，但此时对象还未构造成功。目前c++11可以使用static对象，call_once或者采用双重检查+内存屏障来实现单例模式。
+
+使用static实现单例模式
+
+{% highlight c++ %}
+
+some_data &get_my_class_instance()
+{
+    static some_data instance; // 线程安全的初始化过程
+    return instance;
+}
+{% endhighlight %}
+
+使用call_once进行初始化，如果call_once调用的方法是成员函数，则还需传入相应的对象，类似于thread
+
+{% highlight c++ %}
+
+//使用call_once进行初始化，保证只初始一次
+
+std::once_flag init_flag;
+
+void init_resource()
+{
+    resource_ptr.reset(new some_data);
+}
+
+void CALL_ONCE_init()
+{
+    std::call_once(init_flag, init_resource);
+}
+{% endhighlight %}
+
+
+### 3.3.2 保护很少更新的数据结构
+
+shared_mutex允许两种使用方式：一个“作者”线程独占访问和共享访问，让多个“读者”线程并发访问。
+
+更新操作可以使用lock_guard或者unique_lock来上锁。读操作可以使用shared_lock来上锁
+
+{% highlight c++ %}
+//使用shared_mutex和shared_lock(c++14起)
+class dns_entry;
+class dns_cache
+{
+private:
+    std::map<std::string, dns_entry> entries;
+    mutable boost::shared_mutex entry_mutex;
+public:
+    dns_entry find_entry(std::string const& domain)
+    {
+        boost::shared_lock<boost::shared_mutex> lk(entry_mutex);
+        std::map<std::string,dns_entry>::const_iterator const it= entries.find(domain);
+
+        return (it != entries.end() ? (*it).second:dns_entry()); 
+    }
+
+    void update_or_add_entry(std::string const domain,dns_entry const& dns_details)
+    {
+        entries[domain] = dns_details;
+    }
+};
+
+{% endhighlight %}
+
+### 3.3.3 嵌套锁
+
+std::recursive_mutex，其功能与 std::mutex 类似，除了你可以从同一线程的单个实例上获取多个锁。互斥量锁住其他线程前，你必须释放你拥有的所有锁，所以当你调用lock()三次时，你也必须调用unlock()三次。
+
